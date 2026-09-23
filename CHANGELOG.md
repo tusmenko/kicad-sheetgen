@@ -8,3 +8,5 @@ First public version: `SymbolLibrary`, `Layout`, `write_sheet`, `expected` / `ne
 `sch_version`, and the op-amp `idioms`. Element uuids are derived from content, so regenerating an
 unchanged sheet gives an identical file. Fully typed (`py.typed`, checked with `mypy --strict`), with
 `Part` (a `TypedDict`) for the `parts` entries and `Placed` (a `NamedTuple`) for placed units.
+`Root` / `write_root` draw a routed root sheet; `write_sheet(..., instances=...)` writes a sheet that is
+placed more than once.

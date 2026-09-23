@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import collections, os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from .ids import stable
 from .layout import Layout, Mirror, Part, Point, xform
@@ -12,6 +12,15 @@ from .symbols import SymbolLibrary, text_w
 def _q(s: object) -> str:
     """A string as it goes between quotes in a KiCad file."""
     return str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+# One placement of a sheet: its hierarchy path ("/<root uuid>/<sheet uuid>") and the reference each
+# symbol takes there. A sheet placed twice needs both, with different references.
+Instance = tuple[str, Callable[[str], str]]
+
+
+def _same(ref: str) -> str:
+    return ref
 
 
 def _on_segment(p: Point, a: Point, b: Point) -> bool:
@@ -24,13 +33,35 @@ def _on_segment(p: Point, a: Point, b: Point) -> bool:
     return False
 
 
-def _instances(project: str, root: str, ref: str, unit: int) -> str:
-    return (f'\t\t(instances\n\t\t\t(project "{_q(project)}"\n\t\t\t\t(path "/{root}"\n\t\t\t\t\t(reference "{_q(ref)}")'
-            f'\n\t\t\t\t\t(unit {unit})\n\t\t\t\t)\n\t\t\t)\n\t\t)\n\t)')
+def _wiring(paths: Sequence[Sequence[Point]], pins: Sequence[Point], marks: Sequence[Point],
+            key: Callable[..., str]) -> list[str]:
+    """Wires and junctions. Every wire is split where another wire, a pin or a label (`marks`) ends
+    on it, so all joins are endpoint to endpoint; a junction goes where three or more ends meet."""
+    ends = [pt for pl in paths for pt in pl] + list(pins) + list(marks)
+    segs: list[tuple[Point, Point]] = []
+    for pl in paths:
+        for a, b in zip(pl, pl[1:]):
+            cuts = sorted({a, b} | {e for e in ends if _on_segment(e, a, b)})
+            segs += [(c, d) for c, d in zip(cuts, cuts[1:])]
+    degree = collections.Counter(pt for s in segs for pt in s)
+    for pt in set(pins):
+        if pt in degree:
+            degree[pt] += 1
+    out = [f'\t(wire (pts (xy {a[0]} {a[1]}) (xy {b[0]} {b[1]})) (stroke (width 0) (type default)) (uuid "{key("wire", a, b)}"))'
+           for a, b in segs]
+    out += [f'\t(junction (at {pt[0]} {pt[1]}) (diameter 0) (color 0 0 0 0) (uuid "{key("junction", pt)}"))'
+            for pt, d in sorted(degree.items()) if d >= 3]
+    return out
+
+
+def _instances(project: str, instances: Sequence[Instance], ref: str, unit: int) -> str:
+    paths = "".join(f'\n\t\t\t\t(path "{_q(path)}"\n\t\t\t\t\t(reference "{_q(ren(ref))}")\n\t\t\t\t\t(unit {unit})\n\t\t\t\t)'
+                    for path, ren in instances)
+    return f'\t\t(instances\n\t\t\t(project "{_q(project)}"{paths}\n\t\t\t)\n\t\t)\n\t)'
 
 
 def symbol_instance(lib_: SymbolLibrary, ref: str, p: Part, lib: str, name: str, x: float, y: float, unit: int, rot: int,
-                    mirror: Mirror, side: str | None, project: str, root: str, uuid: str) -> str:
+                    mirror: Mirror, side: str | None, project: str, instances: Sequence[Instance], uuid: str) -> str:
     def prop(k: str, v: str, dx: float, dy: float, hide: bool = False) -> str:
         # a field's angle turns with its symbol, so a quarter-turned part needs its text turned back;
         # text stays centred because KiCad mirrors left / right justification on flipped parts
@@ -60,13 +91,13 @@ def symbol_instance(lib_: SymbolLibrary, ref: str, p: Part, lib: str, name: str,
         f'\t(symbol\n\t\t(lib_id "{lib}:{name}")\n\t\t(at {x} {y} {rot})' + (f"\n\t\t(mirror {mirror})" if mirror else "")
         + f'\n\t\t(unit {unit})'
         f'\n\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n\t\t(dnp {dnp})\n\t\t(uuid "{uuid}")',
-        prop("Reference", ref, rx, ry), prop("Value", val, vx, vy),
+        prop("Reference", instances[0][1](ref), rx, ry), prop("Value", val, vx, vy),
         prop("Footprint", p.get("footprint", ""), 0, 0, True), prop("Datasheet", "~", 0, 0, True),
-        _instances(project, root, ref, unit)])
+        _instances(project, instances, ref, unit)])
 
 
 def power_instance(net: str, x: float, y: float, n: int, rot: int, power_base: Mapping[str, str], project: str,
-                   root: str, uuid: str) -> str:
+                   instances: Sequence[Instance], uuid: str) -> str:
     base = power_base.get(net, net)
     down = net == "GND" or net.startswith("-")
     # the value sits past the symbol's body, which points up for a supply and down for GND
@@ -80,21 +111,28 @@ def power_instance(net: str, x: float, y: float, n: int, rot: int, power_base: M
     return "\n".join([
         (f'\t(symbol\n\t\t(lib_id "power:{base}")\n\t\t(at {x} {y} {rot})\n\t\t(unit 1)'
         f'\n\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n\t\t(dnp no)\n\t\t(uuid "{uuid}")'),
-        prop("Reference", ref, 0, 0, True), prop("Value", net, dx, dy),
+        prop("Reference", instances[0][1](ref), 0, 0, True), prop("Value", net, dx, dy),
         prop("Footprint", "", 0, 0, True), prop("Datasheet", "~", 0, 0, True),
-        _instances(project, root, ref, 1)])
+        _instances(project, instances, ref, 1)])
 
 
 def write_sheet(L: Layout, path: str, *, version: str, generator_version: str, project: str, root: str, title: str,
                 company: str = "", comments: Sequence[str] = (), power_base: Mapping[str, str] | None = None,
-                generator: str = "kicad-sheetgen") -> None:
+                generator: str = "kicad-sheetgen", instances: Sequence[Instance] | None = None) -> None:
     """Write layout `L` to `path`.
 
     version / generator_version: from `kicad_sheetgen.kicad.sch_version()`. project / root: the KiCad
     project name and root sheet uuid the symbol instances belong to. power_base maps a rail with
     no stock power symbol (say "+3V3_A") to the stock one it borrows ("+3V3").
+
+    instances: where this sheet is placed in a hierarchy, one (path, renamer) per placement; the
+    renamer gives each symbol's reference in that placement, including power symbols ("#PWR01"),
+    which KiCad wants unique across the design. Default: the sheet is the root itself.
     """
     power_base = power_base or {}
+    places: Sequence[Instance] = [("/" + root, _same)] if instances is None else instances
+    if not places:
+        raise ValueError("a sheet needs at least one placement")
     lib = L.lib
     ns = os.path.basename(path)
 
@@ -106,27 +144,12 @@ def write_sheet(L: Layout, path: str, *, version: str, generator_version: str, p
     rows = ["\t\t" + lib.definition(a, b) for a, b in sorted(need)]
     body: list[str] = []
     for ref, unit, lb, name, x, y, rot, mirror, side in L.placed:
-        body.append(symbol_instance(lib, ref, L.parts[ref], lb, name, x, y, unit, rot, mirror, side, project, root,
+        body.append(symbol_instance(lib, ref, L.parts[ref], lb, name, x, y, unit, rot, mirror, side, project, places,
                                     key("symbol", ref, unit)))
     for i, (net, (x, y), rot) in enumerate(L.power, 1):
-        body.append(power_instance(net, x, y, i, rot, power_base, project, root, key("power", net, x, y)))
-    # split every wire where another wire or a pin ends on it, so all joins are endpoint-to-endpoint
-    ends = [pt for pl in L.paths for pt in pl] + list(L.pin.values())
-    ends += [at for _, at, _ in L.locals] + [at for _, at, _, _ in L.labels]
-    segs: list[tuple[Point, Point]] = []
-    for pl in L.paths:
-        for a, b in zip(pl, pl[1:]):
-            cuts = sorted({a, b} | {e for e in ends if _on_segment(e, a, b)})
-            segs += [(c, d) for c, d in zip(cuts, cuts[1:])]
-    degree = collections.Counter(pt for s in segs for pt in s)
-    for pt in set(L.pin.values()):
-        if pt in degree:
-            degree[pt] += 1
-    for a, b in segs:
-        body.append(f'\t(wire (pts (xy {a[0]} {a[1]}) (xy {b[0]} {b[1]})) (stroke (width 0) (type default)) (uuid "{key("wire", a, b)}"))')
-    for pt, d in sorted(degree.items()):
-        if d >= 3:
-            body.append(f'\t(junction (at {pt[0]} {pt[1]}) (diameter 0) (color 0 0 0 0) (uuid "{key("junction", pt)}"))')
+        body.append(power_instance(net, x, y, i, rot, power_base, project, places, key("power", net, x, y)))
+    marks = [at for _, at, _ in L.locals] + [at for _, at, _, _ in L.labels]
+    body += _wiring(L.paths, list(L.pin.values()), marks, key)
     for name, (x, y), shape, right in L.labels:
         rot, just = (0, "left") if right else (180, "right")
         body.append(f'\t(hierarchical_label "{_q(name)}"\n\t\t(shape {shape})\n\t\t(at {x} {y} {rot})'

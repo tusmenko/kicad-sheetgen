@@ -81,6 +81,26 @@ ok = sg.compare(sg.expected(L), sg.netlist("out.kicad_sch", "out.net"), named={"
 describes one entry, so a type checker catches a misspelt key before KiCad does. Coordinates are schematic millimetres; keep them on
 the 1.27 mm grid.
 
+## Hierarchies
+
+`Root` draws the top sheet as a block diagram: child sheets stand in columns, a net whose pins all
+face one gap gets its own vertical track there, and a net that reaches both sides of a column is
+labelled instead of wired across. `route()` lists nets that only one sheet carries in `problems`.
+
+```python
+R = sg.Root()
+left, hub = R.column("Inputs"), R.column("Core")
+R.sheet(left, "in_a", "input.kicad_sch", "Input A", right=["IN_A"])
+R.sheet(left, "in_b", "input.kicad_sch", "Input B", right=["IN_B"])
+R.sheet(hub, "core", "core.kicad_sch", "Core", left=["IN_A", "IN_B"], auto=True)
+sg.write_root(R.route(), "project.kicad_sch", version=version, generator_version=gen,
+              project="project", root_uuid=root, title="Project")
+```
+
+A file placed more than once, like `input.kicad_sch` above, is written once with every placement:
+`write_sheet(..., instances=[(f"/{root}/{sg.sheet_uuid('in_a')}", same), (f"/{root}/{sg.sheet_uuid('in_b')}", renamed)])`,
+where each renamer gives the references (power symbols included) that placement uses.
+
 ## Requirements
 
 - Python 3.9+ with no third-party packages (KiCad's bundled interpreter works).

@@ -10,10 +10,12 @@
 from .ids import stable, uid
 from .kicad import cli, sch_version, stock_symbols
 from .layout import Anchor, Layout, Part, Placed, Point, xform
+from .root import Root, sheet_uuid, write_root
 from .symbols import SymbolLibrary, text_w
 from .verify import compare, expected, netlist
-from .writer import write_sheet
+from .writer import Instance, write_sheet
 from . import idioms
 
-__all__ = ["Anchor", "Layout", "Part", "Placed", "Point", "SymbolLibrary", "cli", "compare", "expected", "idioms",
-           "netlist", "sch_version", "stable", "stock_symbols", "text_w", "uid", "write_sheet", "xform"]
+__all__ = ["Anchor", "Instance", "Layout", "Part", "Placed", "Point", "Root", "SymbolLibrary", "cli", "compare", "expected",
+           "idioms", "netlist", "sch_version", "sheet_uuid", "stable", "stock_symbols", "text_w", "uid", "write_root",
+           "write_sheet", "xform"]
