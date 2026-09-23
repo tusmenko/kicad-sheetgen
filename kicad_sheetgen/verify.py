@@ -1,17 +1,24 @@
 """Prove a drawn sheet joins exactly the pins its source says it should."""
+from __future__ import annotations
+
 import collections, re, subprocess
+from collections.abc import Collection, Iterable, Mapping, Set
+from typing import TYPE_CHECKING
 
 from . import kicad
 from .symbols import _close
 
+if TYPE_CHECKING:
+    from .layout import Layout
 
-def expected(L):
+
+def expected(L: Layout) -> dict[str, list[str]]:
     """{net: ["REF.pin", ...]} the drawing must reproduce, over every part it placed.
 
     Nets carried by a hierarchical label are keyed by the label's name, which is what KiCad
     will call them.
     """
-    nets = collections.defaultdict(list)
+    nets: dict[str, list[str]] = collections.defaultdict(list)
     for ref in {p[0] for p in L.placed}:
         for num, n in L.parts[ref]["pins"].items():
             if n:
@@ -19,14 +26,14 @@ def expected(L):
     return nets
 
 
-def netlist(sch, out):
+def netlist(sch: str, out: str) -> dict[str, set[str]]:
     """Export `sch` with kicad-cli to `out` and read it back as {net name: {"REF.pin"}}."""
     r = subprocess.run([kicad.cli(), "sch", "export", "netlist", "-o", out, sch], capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"netlist export failed: {(r.stdout + r.stderr).strip()[-300:]}")
     with open(out, encoding="utf-8") as f:
         txt = f.read()
-    got = collections.defaultdict(set)
+    got: dict[str, set[str]] = collections.defaultdict(set)
     # KiCad writes the netlist across lines, so slice each (net …) by paren depth
     for m in re.finditer(r'\(net\b', txt):
         blk = txt[m.start():_close(txt, m.start()) + 1]
@@ -38,7 +45,8 @@ def netlist(sch, out):
     return got
 
 
-def compare(want, got, named=(), source="the source"):
+def compare(want: Mapping[str, Collection[str]], got: Mapping[str, Set[str]], named: Iterable[str] = (),
+            source: str = "the source") -> bool:
     """True when `got` joins exactly the pins `want` joins, printing every difference.
 
     Only rails and interface nets carry names in a drawn sheet; every other net is anonymous, so

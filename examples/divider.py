@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import kicad_sheetgen as sg
 
 out = sys.argv[1] if len(sys.argv) > 1 else "."
-parts = {
+parts: dict[str, sg.Part] = {
     "R1": {"value": "10k", "symbol": ("Device", "R"), "pins": {"1": "IN", "2": "MID"}},
     "R2": {"value": "10k", "symbol": ("Device", "R"), "pins": {"1": "MID", "2": "GND"}},
     "C1": {"value": "100n", "symbol": ("Device", "C"), "pins": {"1": "MID", "2": "GND"}},

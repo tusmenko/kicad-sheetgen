@@ -1,7 +1,41 @@
 """A sheet described in code: parts placed by hand, joined by real wires."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Literal, NamedTuple, Optional, TypedDict, Union
+
+from .symbols import SymbolLibrary
+
+Point = tuple[float, float]
+Anchor = Union[str, Point]                  # "R1.2", "R1.L" or (x, y)
+Mirror = Optional[Literal["x", "y"]]
 
 
-def xform(px, py, rot, mirror=None):
+class _PartExtras(TypedDict, total=False):
+    footprint: str
+    dnp: bool
+
+
+class Part(_PartExtras):
+    """One entry of `parts`: pins numbered as in the symbol, each mapped to its net."""
+    value: str
+    symbol: tuple[str, str]
+    pins: Mapping[str, str]
+
+
+class Placed(NamedTuple):
+    ref: str
+    unit: int
+    lib: str
+    name: str
+    x: float
+    y: float
+    rot: int
+    mirror: Mirror
+    side: str | None                     # where the reference and value go
+
+
+def xform(px: float, py: float, rot: int, mirror: Mirror = None) -> Point:
     """Symbol-library pin offset -> schematic offset. Library y points up, schematic y down."""
     x, y = px, -py
     for _ in range(int(rot) // 90 % 4):         # schematic rotation is counter-clockwise on screen
@@ -24,17 +58,23 @@ class Layout:
     "R1.T" / "R1.B" (vertical), or plain (x, y) points.
     """
 
-    def __init__(self, parts, library, paper="A4"):
+    def __init__(self, parts: Mapping[str, Part], library: SymbolLibrary, paper: str = "A4") -> None:
         self.parts, self.lib, self.paper = parts, library, paper
-        self.placed = []            # (ref, unit, lib, name, x, y, rot, mirror, label side)
-        self.pin = {}               # "REF.num" -> (x, y)
-        self.paths, self.labels, self.locals, self.power, self.nc, self.texts = [], [], [], [], [], []
-        self.interface = {}         # net -> hierarchical label name
+        self.placed: list[Placed] = []
+        self.pin: dict[str, Point] = {}                                     # "REF.num" -> (x, y)
+        self.paths: list[list[Point]] = []
+        self.labels: list[tuple[str, Point, str, bool]] = []               # name, at, shape, right
+        self.locals: list[tuple[str, Point, int]] = []                      # name, at, rot
+        self.power: list[tuple[str, Point, int]] = []                       # net, at, rot
+        self.nc: list[Point] = []
+        self.texts: list[tuple[str, float, float]] = []
+        self.interface: dict[str, str] = {}                                 # net -> hierarchical label name
 
-    def net(self, ref, num):
+    def net(self, ref: str, num: str) -> str | None:
         return self.parts[ref]["pins"].get(num)
 
-    def place(self, ref, x, y, unit=1, rot=0, mirror=None, first=None, side=None):
+    def place(self, ref: str, x: float, y: float, unit: int = 1, rot: int = 0, mirror: Mirror = None,
+              first: str | None = None, side: str | None = None) -> Layout:
         """Put one unit of a part at (x, y).
 
         `first` names the net that goes on the left (or top) pin of a two-pin part; the part is
@@ -54,7 +94,7 @@ class Layout:
                     break
             else:
                 raise ValueError(f"{ref}: no end on net {first}")
-        at = {}
+        at: dict[str, Point] = {}
         for _, num, px, py, _ in pins:
             dx, dy = xform(px, py, rot, mirror)
             at[num] = (round(x + dx, 2), round(y + dy, 2))
@@ -65,13 +105,13 @@ class Layout:
             self.pin[f"{ref}.L"] = self.pin[f"{ref}.T"] = a
             self.pin[f"{ref}.R"] = self.pin[f"{ref}.B"] = b
             orient = "v" if a[0] == b[0] else "h"
-        self.placed.append((ref, unit, lib, name, x, y, rot, mirror, side or orient))
+        self.placed.append(Placed(ref, unit, lib, name, x, y, rot, mirror, side or orient))
         return self
 
-    def pt(self, a):
+    def pt(self, a: Anchor) -> Point:
         return self.pin[a] if isinstance(a, str) else (round(a[0], 2), round(a[1], 2))
 
-    def wire(self, *anchors):
+    def wire(self, *anchors: Anchor) -> None:
         """Orthogonal polyline through anchors. Joins are found for you: a wire that ends on
         another wire, or on a pin, is split there and gets a junction where three or more meet."""
         pts = [self.pt(a) for a in anchors]
@@ -80,22 +120,22 @@ class Layout:
                 raise ValueError(f"diagonal wire {a} -> {b}")
         self.paths.append(pts)
 
-    def rail(self, net, at, rot=0):
+    def rail(self, net: str, at: Anchor, rot: int = 0) -> None:
         """A power symbol. A net with no stock symbol borrows one (see `power_base`) and keeps
         its own name as the value, which is what names the net."""
         self.power.append((net, self.pt(at), rot))
 
-    def hlabel(self, name, at, net, shape="input", right=False):
+    def hlabel(self, name: str, at: Anchor, net: str, shape: str = "input", right: bool = False) -> None:
         """Hierarchical label: the sheet's interface. `net` is the part-side net it carries."""
         self.interface[net] = name
         self.labels.append((name, self.pt(at), shape, right))
 
-    def label(self, name, at, rot=0):
+    def label(self, name: str, at: Anchor, rot: int = 0) -> None:
         """Local label; rot 0 reads to the right of the point, 180 left, 90 up, 270 down."""
         self.locals.append((name, self.pt(at), rot))
 
-    def no_connect(self, at):
+    def no_connect(self, at: Anchor) -> None:
         self.nc.append(self.pt(at))
 
-    def text(self, s, x, y):
+    def text(self, s: str, x: float, y: float) -> None:
         self.texts.append((s, x, y))

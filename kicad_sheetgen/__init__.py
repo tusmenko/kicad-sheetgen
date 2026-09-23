@@ -9,11 +9,11 @@
 """
 from .ids import stable, uid
 from .kicad import cli, sch_version, stock_symbols
-from .layout import Layout, xform
+from .layout import Anchor, Layout, Part, Placed, Point, xform
 from .symbols import SymbolLibrary, text_w
 from .verify import compare, expected, netlist
 from .writer import write_sheet
 from . import idioms
 
-__all__ = ["stable", "uid", "cli", "sch_version", "stock_symbols", "Layout", "xform", "SymbolLibrary", "text_w",
-           "compare", "expected", "netlist", "write_sheet", "idioms"]
+__all__ = ["Anchor", "Layout", "Part", "Placed", "Point", "SymbolLibrary", "cli", "compare", "expected", "idioms",
+           "netlist", "sch_version", "stable", "stock_symbols", "text_w", "uid", "write_sheet", "xform"]

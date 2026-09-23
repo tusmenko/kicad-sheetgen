@@ -1,10 +1,20 @@
 """Recurring analog drawings: op-amp chains, supply units, spare sections."""
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Optional
+
+from .layout import Layout, Point
+
+Stage = tuple[int, str, str, Optional[str]]     # section, Rin, Rfb, Cfb
+End = tuple[str, str]                           # ("label", name) or ("jack", ref)
 
 # quad op-amp (TL074, MCP6004, LM324 ...) section -> (inverting, non-inverting, output) pin
-OPAMP = {1: ("2", "3", "1"), 2: ("6", "5", "7"), 3: ("9", "10", "8"), 4: ("13", "12", "14")}
+OPAMP: dict[int, tuple[str, str, str]] = {1: ("2", "3", "1"), 2: ("6", "5", "7"), 3: ("9", "10", "8"), 4: ("13", "12", "14")}
 
 
-def two_stage(L, u, y, stages, src, sink, rout, x0=50.8):
+def two_stage(L: Layout, u: str, y: float, stages: Sequence[Stage], src: End, sink: End, rout: str,
+              x0: float = 50.8) -> Point | None:
     """Op-amp chain, left to right: source -> inverting stages -> series R -> sink.
 
     stages: [(section, Rin, Rfb, Cfb or None)]. Each section is mirrored so its inverting input is
@@ -13,7 +23,7 @@ def two_stage(L, u, y, stages, src, sink, rout, x0=50.8):
     Returns the jack-tip point of a jack source, so a caller can hang more on it.
     """
     xs, yi = x0, round(y - 2.54, 2)
-    tip = None
+    tip: Point | None = None
     first_node = L.net(u, OPAMP[stages[0][0]][0])
     rin0 = stages[0][1]
     src_net = next(n for n in L.parts[rin0]["pins"].values() if n != first_node)
@@ -61,14 +71,14 @@ def two_stage(L, u, y, stages, src, sink, rout, x0=50.8):
     return tip
 
 
-def supply(L, u, x, y, top="+12V", bot="-12V"):
+def supply(L: Layout, u: str, x: float, y: float, top: str = "+12V", bot: str = "-12V") -> None:
     """The supply section (unit 5) of a quad op-amp, rails straight off its pins 4 and 11."""
     L.place(u, x, y, unit=5)
     L.wire(f"{u}.4", (x, y - 12.7)); L.rail(top, (x, y - 12.7))
     L.wire(f"{u}.11", (x, y + 12.7)); L.rail(bot, (x, y + 12.7), rot=0)
 
 
-def spare(L, u, sec, x, y):
+def spare(L: Layout, u: str, sec: int, x: float, y: float) -> None:
     """An unused section, tied off as a grounded follower."""
     inv, non, out = OPAMP[sec]
     L.place(u, x, y, unit=sec, mirror="x")

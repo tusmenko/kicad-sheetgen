@@ -46,7 +46,7 @@ point, so verification is built in.
 ## Install
 
 ```sh
-pip install git+https://github.com/<owner>/kicad-sheetgen
+pip install git+https://github.com/tusmenko/kicad-sheetgen
 ```
 
 or put the checkout on `sys.path`: the package has no dependencies, so KiCad's bundled Python
@@ -61,7 +61,7 @@ result (`python examples/divider.py /tmp`). A larger one, using the op-amp idiom
 import kicad_sheetgen as sg
 
 lib = sg.SymbolLibrary({"MyLib": "lib/MyLib.kicad_sym"})     # Device, power, ... come from your KiCad
-parts = {
+parts: dict[str, sg.Part] = {
     "U1": {"value": "TL074", "symbol": ("MyLib", "TL074"), "pins": {"1": "OUT", "2": "N1", "3": "GND", ...}},
     "R1": {"value": "10K", "symbol": ("Device", "R"), "pins": {"1": "IN", "2": "N1"}},
     ...
@@ -77,7 +77,8 @@ sg.write_sheet(L, "out.kicad_sch", version=version, generator_version=gen,
 ok = sg.compare(sg.expected(L), sg.netlist("out.kicad_sch", "out.net"), named={"GND", "DAC_L"})
 ```
 
-`parts` pins are numbered as in the symbol. Coordinates are schematic millimetres; keep them on
+`parts` pins are numbered as in the symbol. The package is fully typed (`py.typed`): `sg.Part`
+describes one entry, so a type checker catches a misspelt key before KiCad does. Coordinates are schematic millimetres; keep them on
 the 1.27 mm grid.
 
 ## Requirements
@@ -98,13 +99,17 @@ The helpers assume a few common conventions, which you can ignore by drawing wit
 directly: rails are placed as symbols from KiCad's `power` library, and `idioms` expects a quad
 op-amp's standard pinout and a three-pin jack (tip 3, switch 2, sleeve 1).
 
-## Tests
+## Development
 
 ```sh
-python -m unittest discover -s tests -t .
+pip install -e ".[dev]"
+pytest              # or, with no dev tools: python -m unittest discover -s tests -t .
+ruff check .
+mypy                # strict, over the package, examples and tests
 ```
 
-The tests that need `kicad-cli` are skipped when KiCad is not installed.
+The tests that need `kicad-cli` are skipped when KiCad is not installed. The package itself has no
+dependencies; pytest, ruff and mypy are only for development.
 
 ## Status
 

@@ -21,7 +21,36 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Typing :: Typed",
 ]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.10", "pytest>=8", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/tusmenko/kicad-sheetgen"
+Issues = "https://github.com/tusmenko/kicad-sheetgen/issues"
+Changelog = "https://github.com/tusmenko/kicad-sheetgen/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 packages = ["kicad_sheetgen"]
+
+[tool.setuptools.package-data]
+kicad_sheetgen = ["py.typed"]
+
+[tool.mypy]
+strict = true
+files = ["kicad_sheetgen", "examples", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 150
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "RUF"]
+# the code's own style: grouped imports on one line, short statements joined by ";",
+# and %-formatting where the template is full of KiCad's own parentheses and quotes
+ignore = ["E401", "E702", "UP031", "RUF005"]

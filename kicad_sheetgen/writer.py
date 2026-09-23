@@ -1,17 +1,20 @@
 """Write a Layout as a .kicad_sch file."""
+from __future__ import annotations
+
 import collections, os
+from collections.abc import Mapping, Sequence
 
 from .ids import stable
-from .layout import xform
-from .symbols import text_w
+from .layout import Layout, Mirror, Part, Point, xform
+from .symbols import SymbolLibrary, text_w
 
 
-def _q(s):
+def _q(s: object) -> str:
     """A string as it goes between quotes in a KiCad file."""
     return str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def _on_segment(p, a, b):
+def _on_segment(p: Point, a: Point, b: Point) -> bool:
     if p in (a, b):
         return False
     if a[0] == b[0] == p[0]:
@@ -21,13 +24,14 @@ def _on_segment(p, a, b):
     return False
 
 
-def _instances(project, root, ref, unit):
+def _instances(project: str, root: str, ref: str, unit: int) -> str:
     return (f'\t\t(instances\n\t\t\t(project "{_q(project)}"\n\t\t\t\t(path "/{root}"\n\t\t\t\t\t(reference "{_q(ref)}")'
             f'\n\t\t\t\t\t(unit {unit})\n\t\t\t\t)\n\t\t\t)\n\t\t)\n\t)')
 
 
-def symbol_instance(lib_, ref, p, lib, name, x, y, unit, rot, mirror, side, project, root, uuid):
-    def prop(k, v, dx, dy, hide=False):
+def symbol_instance(lib_: SymbolLibrary, ref: str, p: Part, lib: str, name: str, x: float, y: float, unit: int, rot: int,
+                    mirror: Mirror, side: str | None, project: str, root: str, uuid: str) -> str:
+    def prop(k: str, v: str, dx: float, dy: float, hide: bool = False) -> str:
         # a field's angle turns with its symbol, so a quarter-turned part needs its text turned back;
         # text stays centred because KiCad mirrors left / right justification on flipped parts
         return (f'\t\t(property "{k}" "{_q(v)}"\n\t\t\t(at {round(x + dx, 2)} {round(y + dy, 2)} {rot % 180})\n\t\t\t(effects (font (size 1.27 1.27))'
@@ -61,27 +65,29 @@ def symbol_instance(lib_, ref, p, lib, name, x, y, unit, rot, mirror, side, proj
         _instances(project, root, ref, unit)])
 
 
-def power_instance(net, x, y, n, rot, power_base, project, root, uuid):
+def power_instance(net: str, x: float, y: float, n: int, rot: int, power_base: Mapping[str, str], project: str,
+                   root: str, uuid: str) -> str:
     base = power_base.get(net, net)
     down = net == "GND" or net.startswith("-")
     # the value sits past the symbol's body, which points up for a supply and down for GND
     dx, dy = xform(0, -3.81 if down else 3.81, rot)
     if dx:
         dx += (1 if dx > 0 else -1) * text_w(net) / 2
-    def prop(k, v, ox, oy, hide=False):
+    def prop(k: str, v: str, ox: float, oy: float, hide: bool = False) -> str:
         return (f'\t\t(property "{k}" "{_q(v)}"\n\t\t\t(at {round(x + ox, 2)} {round(y + oy, 2)} {rot % 180})\n\t\t\t(effects (font (size 1.27 1.27))'
                 + (" (hide yes)" if hide else "") + ")\n\t\t)")
     ref = "#PWR%02d" % n
     return "\n".join([
-        f'\t(symbol\n\t\t(lib_id "power:{base}")\n\t\t(at {x} {y} {rot})\n\t\t(unit 1)'
-        f'\n\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n\t\t(dnp no)\n\t\t(uuid "{uuid}")',
+        (f'\t(symbol\n\t\t(lib_id "power:{base}")\n\t\t(at {x} {y} {rot})\n\t\t(unit 1)'
+        f'\n\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n\t\t(dnp no)\n\t\t(uuid "{uuid}")'),
         prop("Reference", ref, 0, 0, True), prop("Value", net, dx, dy),
         prop("Footprint", "", 0, 0, True), prop("Datasheet", "~", 0, 0, True),
         _instances(project, root, ref, 1)])
 
 
-def write_sheet(L, path, *, version, generator_version, project, root, title, company="",
-                comments=(), power_base=None, generator="kicad-sheetgen"):
+def write_sheet(L: Layout, path: str, *, version: str, generator_version: str, project: str, root: str, title: str,
+                company: str = "", comments: Sequence[str] = (), power_base: Mapping[str, str] | None = None,
+                generator: str = "kicad-sheetgen") -> None:
     """Write layout `L` to `path`.
 
     version / generator_version: from `kicad_sheetgen.kicad.sch_version()`. project / root: the KiCad
@@ -91,11 +97,14 @@ def write_sheet(L, path, *, version, generator_version, project, root, title, co
     power_base = power_base or {}
     lib = L.lib
     ns = os.path.basename(path)
-    key = lambda *k: stable(ns, *k)
+
+    def key(*k: object) -> str:
+        return stable(ns, *k)
+
     need = {L.parts[r]["symbol"] for r in {p[0] for p in L.placed}}
     need |= {("power", power_base.get(n, n)) for n, _, _ in L.power}
     rows = ["\t\t" + lib.definition(a, b) for a, b in sorted(need)]
-    body = []
+    body: list[str] = []
     for ref, unit, lb, name, x, y, rot, mirror, side in L.placed:
         body.append(symbol_instance(lib, ref, L.parts[ref], lb, name, x, y, unit, rot, mirror, side, project, root,
                                     key("symbol", ref, unit)))
@@ -104,7 +113,7 @@ def write_sheet(L, path, *, version, generator_version, project, root, title, co
     # split every wire where another wire or a pin ends on it, so all joins are endpoint-to-endpoint
     ends = [pt for pl in L.paths for pt in pl] + list(L.pin.values())
     ends += [at for _, at, _ in L.locals] + [at for _, at, _, _ in L.labels]
-    segs = []
+    segs: list[tuple[Point, Point]] = []
     for pl in L.paths:
         for a, b in zip(pl, pl[1:]):
             cuts = sorted({a, b} | {e for e in ends if _on_segment(e, a, b)})
